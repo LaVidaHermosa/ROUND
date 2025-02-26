@@ -13,6 +13,7 @@ import { createQuickPick } from '../../../shared/ui/pickerPrompter'
 import { createFolderPrompt } from '../../../shared/ui/common/location'
 import { createExitPrompter } from '../../../shared/ui/common/exitPrompter'
 import { MetadataManager } from './metadataManager'
+import type { ExtensionContext } from 'vscode'
 import { ToolkitError } from '../../../shared/errors'
 
 const localize = nls.loadMessageBundle()
@@ -22,6 +23,7 @@ export interface CreateServerlessLandWizardForm {
     pattern: string
     runtime: string
     iac: string
+    assetName: string
 }
 
 function promptPattern(metadataManager: MetadataManager) {
@@ -134,11 +136,11 @@ function promptName() {
 export class CreateServerlessLandWizard extends Wizard<CreateServerlessLandWizardForm> {
     private metadataManager: MetadataManager
 
-    public constructor(context: { defaultRegion?: string; credentials?: AWS.Credentials }) {
+    public constructor(context: { ctx: ExtensionContext; defaultRegion?: string; credentials?: AWS.Credentials }) {
         super({
             exitPrompterProvider: createExitPrompter,
         })
-        this.metadataManager = MetadataManager.initialize()
+        this.metadataManager = MetadataManager.initialize(context.ctx)
         this.form.pattern.bindPrompter(() => promptPattern(this.metadataManager))
         this.form.runtime.bindPrompter((state) => promptRuntime(this.metadataManager, state.pattern))
         this.form.iac.bindPrompter((state) => promptIac(this.metadataManager, state.pattern))

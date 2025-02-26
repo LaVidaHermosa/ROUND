@@ -5,6 +5,7 @@
 import * as nodefs from 'fs' // eslint-disable-line no-restricted-imports
 import { ToolkitError } from '../../../shared/errors'
 import path from 'path'
+import { ExtensionContext } from 'vscode'
 
 interface Implementation {
     iac: string
@@ -17,6 +18,10 @@ interface PatternData {
     implementation: Implementation[]
 }
 
+interface PatternUrls {
+    githubUrl: string
+    previewUrl: string
+}
 export interface ProjectMetadata {
     patterns: Record<string, PatternData>
 }
@@ -28,14 +33,6 @@ export interface ProjectMetadata {
 export class MetadataManager {
     private static instance: MetadataManager
     private metadata: ProjectMetadata | undefined
-    private static readonly metadataPath = path.join(
-        path.resolve(__dirname, '../../../../../'),
-        'src',
-        'awsService',
-        'appBuilder',
-        'serverlessLand',
-        'metadata.json'
-    )
 
     private constructor() {}
 
@@ -46,12 +43,17 @@ export class MetadataManager {
         return MetadataManager.instance
     }
 
-    public static initialize(): MetadataManager {
+    public static initialize(ctx: ExtensionContext): MetadataManager {
         const instance = MetadataManager.getInstance()
-        instance.loadMetadata(MetadataManager.metadataPath).catch((err) => {
+        const metadataPath = instance.getMetadataPath(ctx)
+        instance.loadMetadata(metadataPath).catch((err) => {
             throw new ToolkitError(`Failed to load metadata: ${err}`)
         })
         return instance
+    }
+
+    public getMetadataPath(ctx: ExtensionContext): string {
+        return ctx.asAbsolutePath(path.join('dist', 'src', 'serverlessLand', 'metadata.json'))
     }
 
     /**
@@ -115,6 +117,24 @@ export class MetadataManager {
         return Array.from(uniqueRuntimes).map((runtime) => ({
             label: runtime,
         }))
+    }
+
+    public getUrl(pattern: string): PatternUrls {
+        const patternData = this.metadata?.patterns?.[pattern]
+        if (!patternData || !patternData.implementation) {
+            return {
+                githubUrl: '',
+                previewUrl: '',
+            }
+        }
+        const asset = patternData.implementation[0].assetName
+
+        return {
+            // GitHub URL for the pattern
+            githubUrl: `https://github.com/aws-samples/serverless-patterns/tree/main/${asset}`,
+            // Serverless Land preview URL
+            previewUrl: `https://serverlessland.com/patterns/${asset}`,
+        }
     }
 
     /**
