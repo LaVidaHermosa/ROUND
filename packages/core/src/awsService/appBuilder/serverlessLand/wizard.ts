@@ -32,7 +32,7 @@ function promptPattern(metadataManager: MetadataManager) {
         throw new ToolkitError('No patterns found in metadata')
     }
 
-    const quickPick = createQuickPick<string>(
+    return createQuickPick<string>(
         patterns.map((p) => ({
             label: p.label,
             detail: p.description,
@@ -56,8 +56,6 @@ function promptPattern(metadataManager: MetadataManager) {
             matchOnDetail: true,
         }
     )
-
-    return quickPick
 }
 
 function promptRuntime(metadataManager: MetadataManager, pattern: string | undefined) {
@@ -142,7 +140,7 @@ export class CreateServerlessLandWizard extends Wizard<CreateServerlessLandWizar
         super({
             exitPrompterProvider: createExitPrompter,
         })
-        this.metadataManager = MetadataManager.initialize()
+        this.metadataManager = MetadataManager.initialize(context.ctx)
         this.form.pattern.bindPrompter(() => promptPattern(this.metadataManager))
         this.form.runtime.bindPrompter((state) => promptRuntime(this.metadataManager, state.pattern))
         this.form.iac.bindPrompter((state) => promptIac(this.metadataManager, state.pattern))
