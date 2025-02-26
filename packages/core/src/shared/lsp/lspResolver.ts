@@ -15,7 +15,11 @@ import { createHash } from '../crypto'
 import { lspSetupStage, StageResolver, tryStageResolvers } from './utils/setupStage'
 import { HttpResourceFetcher } from '../resourcefetcher/httpResourceFetcher'
 import { showMessageWithCancel } from '../../shared/utilities/messages'
-import { Timeout } from '../utilities/timeoutUtils'
+import { CancellationError, Timeout } from '../utilities/timeoutUtils'
+import { RequestCancelledError } from '../request'
+
+// max timeout for downloading remote LSP assets progress, the lowest possible is 3000, bounded by httpResourceFetcher's waitUntil
+const remoteDownloadTimeout = 5000
 
 export class LanguageServerResolver {
     constructor(
@@ -33,8 +37,6 @@ export class LanguageServerResolver {
      * @throws ToolkitError if no compatible version can be found
      */
     async resolve() {
-        const timeout = new Timeout(5000)
-        await showMessageWithCancel(`Downloading '${this.lsName}' language server`, timeout)
         function getServerVersion(result: LspResult) {
             return {
                 languageServerVersion: result.version,
@@ -63,7 +65,6 @@ export class LanguageServerResolver {
             return await tryStageResolvers('getServer', serverResolvers, getServerVersion)
         } finally {
             logger.info(`Finished setting up LSP server`)
-            timeout.cancel()
         }
     }
 
@@ -87,19 +88,39 @@ export class LanguageServerResolver {
         }
     }
 
+    /**
+     * Show a toast notification with progress bar for lsp remote downlaod
+     * Returns a timeout to be passed down into httpFetcher to handle user cancellation
+     */
+    private async showDownloadProgress() {
+        const timeout = new Timeout(remoteDownloadTimeout)
+        await showMessageWithCancel(`Downloading '${this.lsName}' language server`, timeout)
+        return timeout
+    }
+
     private async fetchRemoteServer(
         cacheDirectory: string,
         latestVersion: LspVersion,
         targetContents: TargetContent[]
     ): Promise<LspResult> {
-        if (await this.downloadRemoteTargetContent(targetContents, latestVersion.serverVersion)) {
-            return {
-                location: 'remote',
-                version: latestVersion.serverVersion,
-                assetDirectory: cacheDirectory,
+        const timeout = await this.showDownloadProgress()
+        try {
+            if (await this.downloadRemoteTargetContent(targetContents, latestVersion.serverVersion, timeout)) {
+                return {
+                    location: 'remote',
+                    version: latestVersion.serverVersion,
+                    assetDirectory: cacheDirectory,
+                }
+            } else {
+                throw new ToolkitError('Failed to download server from remote', { code: 'RemoteDownloadFailed' })
             }
-        } else {
-            throw new ToolkitError('Failed to download server from remote', { code: 'RemoteDownloadFailed' })
+        } catch (err) {
+            if (err instanceof RequestCancelledError) {
+                throw new CancellationError('user')
+            }
+            throw err
+        } finally {
+            timeout.dispose()
         }
     }
 
@@ -193,7 +214,7 @@ export class LanguageServerResolver {
      *  true, if all of the contents were successfully downloaded and unzipped
      *  false, if any of the contents failed to download or unzip
      */
-    private async downloadRemoteTargetContent(contents: TargetContent[], version: string) {
+    private async downloadRemoteTargetContent(contents: TargetContent[], version: string, timeout: Timeout) {
         const downloadDirectory = this.getDownloadDirectory(version)
 
         if (!(await fs.existsDir(downloadDirectory))) {
@@ -202,7 +223,11 @@ export class LanguageServerResolver {
 
         const fetchTasks = contents.map(async (content) => {
             return {
-                res: await new HttpResourceFetcher(content.url, { showUrl: true }).get(),
+                res: await new HttpResourceFetcher(content.url, {
+                    showUrl: true,
+                    timeout: timeout,
+                    swallowError: false,
+                }).get(),
                 hash: content.hashes[0],
                 filename: content.filename,
             }
